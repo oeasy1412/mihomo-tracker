@@ -1,0 +1,86 @@
+#!/bin/sh /etc/rc.common
+#
+# OpenWrt / ImmortalWrt procd init script for mihomo-tracker agent
+# Install: cp mihomo-tracker /etc/init.d/ && chmod +x /etc/init.d/mihomo-tracker
+# Enable:  /etc/init.d/mihomo-tracker enable
+# Usage:   /etc/init.d/mihomo-tracker {start|stop|restart|reload|status}
+#
+
+START=99
+STOP=10
+USE_PROCD=1
+
+# 二进制路径
+PROG=/usr/bin/mihomo-tracker
+
+# 工作目录（默认 /tmp，保护路由器闪存）
+WORK_DIR=/tmp/mihomo-tracker
+
+# 运行参数（按需修改，或改为从 uci 读取）
+MASTER_URL="http://192.168.1.100:8051"
+MASTER_TOKEN="YOUR_MASTER_TOKEN"
+AGENT_ID="openwrt-router"
+MIHOMO_HOST="127.0.0.1"
+MIHOMO_PORT="9097"
+MIHOMO_TOKEN=""
+LOCAL_DB="$WORK_DIR/agent.db"
+LOG_DIR="$WORK_DIR/logs"
+DATA_RETENTION_DAYS="1"
+LOG_RETENTION_DAYS="7" # 离线日志保留时间
+SYNC_INTERVAL="60"
+
+start_service() {
+    # 确保工作目录存在
+    mkdir -p "$WORK_DIR" "$LOG_DIR"
+
+    procd_open_instance mihomo-tracker-agent
+    procd_set_param command "$PROG" agent \
+        --local-database "$LOCAL_DB" \
+        --log-dir "$LOG_DIR" \
+        --master-url "$MASTER_URL" \
+        --master-token "$MASTER_TOKEN" \
+        --agent-id "$AGENT_ID" \
+        --mihomo-host "$MIHOMO_HOST" \
+        --mihomo-port "$MIHOMO_PORT" \
+        --mihomo-token "$MIHOMO_TOKEN" \
+        --data-retention-days "$DATA_RETENTION_DAYS" \
+        --log-retention-days "$LOG_RETENTION_DAYS" \
+        --sync-interval "$SYNC_INTERVAL"
+
+    # 自动重启：崩溃或退出后 5 秒内重启，最多重试 7 次，之后如果持续失败则永久停止
+    procd_set_param respawn 3600 5 7
+
+    # 进程标识
+    procd_set_param pidfile /var/run/mihomo-tracker.pid
+
+    # 标准输出/错误重定向（可选，procd 会自动记录到 logd）
+    # procd_set_param stdout 1
+    # procd_set_param stderr 1
+
+    procd_close_instance
+}
+
+stop_service() {
+    rm -f /var/run/mihomo-tracker.pid
+}
+
+status() {
+    if [ -f /var/run/mihomo-tracker.pid ]; then
+        PID=$(cat /var/run/mihomo-tracker.pid)
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "mihomo-tracker agent is running (PID: $PID)"
+            return 0
+        fi
+    fi
+    echo "mihomo-tracker agent is not running"
+    return 1
+}
+
+# reload 支持（热重载配置，目前实现为重启）
+reload_service() {
+    restart
+}
+
+service_triggers() {
+    procd_add_reload_trigger "mihomo-tracker"
+}
